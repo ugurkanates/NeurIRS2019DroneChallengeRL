@@ -8,10 +8,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Normal
+import numpy as np
 
 
 baseline_racer = BaselineRacer(drone_name="drone_1",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
-#baseline_racer2 = BaselineRacer(drone_name="drone_0",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
+baseline_racer2 = BaselineRacer("drone_2",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
 
 baseline_racer.load_level("Soccer_Field_Easy")
 baseline_racer.start_race(3)
@@ -23,7 +24,7 @@ baseline_racer.initialize_drone()
 #gitbakalim = airsim.Vector3r(start_position.x_val+5, start_position.y_val+5, start_position.z_val+5)
 
 baseline_racer.takeoffAsync()
-#baseline_racer2.takeoffAsync()
+baseline_racer2.takeoffAsync()
 
 #baseline_racer.airsim_client.moveToPositionAsync(5,5,5,3)
 #baseline_racer.airsim_client.moveToZAsync(10.0,5)
@@ -120,7 +121,8 @@ train_epoch = 0
 best_reward = None
 frame_idx  = 0
 early_stop = False
-
+# State computation
+# our info (LINVELXYZ+OURXYZ ) + enemy info(LINVELXYZ+XYZ)
 
 # ENV Reset function cagirilmalixd
 while not early_stop:
@@ -131,10 +133,24 @@ while not early_stop:
     actions   = []
     rewards   = []
     masks     = []
-    state = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
+    state = np.zeros(number_of_inputs) ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
+    pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
+    linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
+    state[0] = pose_object_temp.x_val
+    state[1] = pose_object_temp.y_val
+    state[2] = pose_object_temp.z_val
+    state[3] = linear_vel_object_temp.x_val
+    state[4] = linear_vel_object_temp.y_val
+    state[5] = linear_vel_object_temp.z_val
+
+
+
+
+    baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
     for _ in range(PPO_STEPS):
         #should change ve3ctr data to .
         state = torch.FloatTensor(state).to(device)
+        #view(-1,1) of tensor to not mess dimensions.
         dist, value = model(state)
 
         action = dist.sample()
@@ -145,7 +161,21 @@ while not early_stop:
         baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+quad_offset[0], quad_vel.y_val+quad_offset[1], quad_vel.z_val+quad_offset[2], 5).join()
         time.sleep(0.5)
 
-        next_state = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
+        next_state = np.zeros(number_of_inputs)
+         ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
+        pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
+        linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
+        next_state[0] = pose_object_temp.x_val
+        next_state[1] = pose_object_temp.y_val
+        next_state[2] = pose_object_temp.z_val
+        next_state[3] = linear_vel_object_temp.x_val
+        next_state[4] = linear_vel_object_temp.y_val
+        next_state[5] = linear_vel_object_temp.z_val
+
+
+
+
+
         quad_vel = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
         reward = compute_reward(quad_state, quad_vel, collision_info)
         done = isDone(reward)
