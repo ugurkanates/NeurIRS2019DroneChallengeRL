@@ -114,6 +114,9 @@ def interpret_action(action):
     For now only going to use linear_velocity hence i dont know much about others?
 
 """
+
+def select_action(mean, std):
+
 def isDone(reward):
     done = 0
     if  reward <= -10:
@@ -162,7 +165,7 @@ while not early_stop:
         #view(-1,1) of tensor to not mess dimensions.
         dist, value = model(state)
 
-        action = dist.sample()
+        action = torch.clamp(dist.sample(), -1.0, 1.0)
         # each state, reward, done is a list of results from each parallel environment
 
         #quad_offset = interpret_action(actions)
