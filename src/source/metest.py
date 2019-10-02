@@ -9,10 +9,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Normal
 import numpy as np
+import gym, gym.spaces, gym.utils, gym.utils.seeding
 
 
 baseline_racer = BaselineRacer(drone_name="drone_1",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
-baseline_racer2 = BaselineRacer("drone_2",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
+#baseline_racer2 = BaselineRacer("drone_2",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
 
 baseline_racer.load_level("Soccer_Field_Easy")
 baseline_racer.start_race(3)
@@ -24,7 +25,7 @@ baseline_racer.initialize_drone()
 #gitbakalim = airsim.Vector3r(start_position.x_val+5, start_position.y_val+5, start_position.z_val+5)
 
 baseline_racer.takeoffAsync()
-baseline_racer2.takeoffAsync()
+#baseline_racer2.takeoffAsync()
 
 #baseline_racer.airsim_client.moveToPositionAsync(5,5,5,3)
 #baseline_racer.airsim_client.moveToZAsync(10.0,5)
@@ -77,6 +78,7 @@ TARGET_REWARD       = 2500
 #Number of Actions explained
 
 """
+ACTIONS SHOULD BE CONTINOUS INSTEAD OF SCALING FACTOR ? just use nn output
 def interpret_action(action):
     scaling_factor = 0.25
     if action == 0:
@@ -99,19 +101,29 @@ def interpret_action(action):
 # Number of Inputs explained
 
 """
-position = Vector3r()
+    position = Vector3r()3
     orientation = Quaternionr()
-    linear_velocity = Vector3r()
-    angular_velocity = Vector3r()
+    linear_velocity = Vector3r() 3
+    angular_velocity = Vector3r() 3
+    dusman POZISYON 3
+    Dusman angular 
+    dusman linear VELO 3
     linear_acceleration = Vector3r()
     angular_acceleration = Vector3r(),
 
     For now only going to use linear_velocity hence i dont know much about others?
 
 """
+def isDone(reward):
+    done = 0
+    if  reward <= -10:
+        done = 1
+    return done
+
 #creating of input something
-number_of_inputs = 12 # for now its beta phase , linear velocity of our drone and enemy drone, position of our drone and enemy drone 3+3+3+3=12
-number_of_actions = 7
+number_of_inputs = 21 # for now its beta phase , linear velocity of our drone and enemy drone, position of our drone and enemy drone 3+3+3+3=12 enemy 6, our 15 now
+number_of_actions = 3 # it was 7 but x,y,z makes more sense than x+,x- etc. hovering action is not neeeded for now?
+# also Timing could be a output that later on but now drone will move 1second fixed or 0.5 second or 1.5 second 
 model = ActorCritic(number_of_inputs,number_of_actions,HIDDEN_SIZE).to(device)
 print(model)
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
@@ -121,8 +133,12 @@ train_epoch = 0
 best_reward = None
 frame_idx  = 0
 early_stop = False
+
+# needed for gym not really here.stateLimits = np.inf*np.ones([number_of_inputs])
+
 # State computation
 # our info (LINVELXYZ+OURXYZ ) + enemy info(LINVELXYZ+XYZ)
+state = np.ones(number_of_inputs)
 
 # ENV Reset function cagirilmalixd
 while not early_stop:
@@ -133,51 +149,54 @@ while not early_stop:
     actions   = []
     rewards   = []
     masks     = []
-    state = np.zeros(number_of_inputs) ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
+    #state = np.zeros(number_of_inputs) ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
+    #state = gym.spaces.box(low=-stateLimits,high=stateLimits,dtype=float32)
+    
     pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
     linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
-    state[0] = pose_object_temp.x_val
-    state[1] = pose_object_temp.y_val
-    state[2] = pose_object_temp.z_val
-    state[3] = linear_vel_object_temp.x_val
-    state[4] = linear_vel_object_temp.y_val
-    state[5] = linear_vel_object_temp.z_val
 
 
-
-
-    baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
     for _ in range(PPO_STEPS):
-        #should change ve3ctr data to .
-        state = torch.FloatTensor(state).to(device)
+        
+        state = torch.FloatTensor(state).to(device).unsqueeze(0)
         #view(-1,1) of tensor to not mess dimensions.
         dist, value = model(state)
 
         action = dist.sample()
         # each state, reward, done is a list of results from each parallel environment
 
-        quad_offset = interpret_action(actions)
+        #quad_offset = interpret_action(actions)
+        # Clipping the action about what? which parameters would be good
+        # LET just say 1 second for now?
+       
         quad_vel = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
-        baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+quad_offset[0], quad_vel.y_val+quad_offset[1], quad_vel.z_val+quad_offset[2], 5).join()
+        actx = action.data.cpu().numpy()
+        baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2], 1).join()
         time.sleep(0.5)
 
-        next_state = np.zeros(number_of_inputs)
+        #THIS IS WRONG ------------------------- next_state = np.zeros(number_of_inputs)
          ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
+
         pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
         linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
-        next_state[0] = pose_object_temp.x_val
-        next_state[1] = pose_object_temp.y_val
-        next_state[2] = pose_object_temp.z_val
-        next_state[3] = linear_vel_object_temp.x_val
-        next_state[4] = linear_vel_object_temp.y_val
-        next_state[5] = linear_vel_object_temp.z_val
+        angular_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_velocity
+        linear_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_acceleration
+        angular_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_acceleration
+        enemy = baseline_racer.airsim_client.simGetGroundTruthKinematics("drone_2")
+
+        # HIGH PROBABILTY just using [pose_object_temp] +  does this already but later will try or cat [] this saw on somewhere whileloking
+        # maybe not because these arent numpy lolz
 
 
 
 
+        next_state = np.array([pose_object_temp.x_val,pose_object_temp.y_val,pose_object_temp.z_val,linear_vel_object_temp.x_val,
+        linear_vel_object_temp.y_val,linear_vel_object_temp.z_val,angular_vel_object_temp.x_val,angular_vel_object_temp.y_val,angular_vel_object_temp.z_val,
+        linear_acc_object_temp.x_val,linear_acc_object_temp.y_val,linear_acc_object_temp.z_val,angular_acc_object_temp.x_val,angular_acc_object_temp.y_val,angular_acc_object_temp.z_val,
+        enemy.position.x_val,enemy.position.y_val,enemy.position.z_val,enemy.linear_velocity.x_val,linear_vel_object_temp.y_val,linear_vel_object_temp.z_val
+        ])
 
-        quad_vel = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
-        reward = compute_reward(quad_state, quad_vel, collision_info)
+        reward =np.array([-5]) # compute_reward(next_state, quad_vel, collision_info)
         done = isDone(reward)
         print('Action, Reward, Done:', action, reward, done)
 
@@ -185,6 +204,7 @@ while not early_stop:
 
         # lets say we do this above ? next_state, reward, done, _ = envs.step(action.cpu().numpy())
         log_prob = dist.log_prob(action)
+        log_probs.append(log_prob)
         values.append(value)
         rewards.append(torch.FloatTensor(reward).unsqueeze(1).to(device))
         masks.append(torch.FloatTensor(1 - done).unsqueeze(1).to(device))
@@ -233,31 +253,6 @@ def ppo_iter(states, actions, log_probs, returns, advantage):
  
 
 
-def compute_reward(quad_state, quad_vel, collision_info):
-    thresh_dist = 7
-    beta = 1
-
-    z = -10
-    pts = [np.array([-.55265, -31.9786, -19.0225]), np.array([48.59735, -63.3286, -60.07256]), np.array([193.5974, -55.0786, -46.32256]), np.array([369.2474, 35.32137, -62.5725]), np.array([541.3474, 143.6714, -32.07256])]
-
-    quad_pt = np.array(list((quad_state.x_val, quad_state.y_val, quad_state.z_val)))
-
-    if collision_info.has_collided:
-        reward = -100
-    else:    
-        dist = 10000000
-        for i in range(0, len(pts)-1):
-            dist = min(dist, np.linalg.norm(np.cross((quad_pt - pts[i]), (quad_pt - pts[i+1])))/np.linalg.norm(pts[i]-pts[i+1]))
-
-        #print(dist)
-        if dist > thresh_dist:
-            reward = -10
-        else:
-            reward_dist = (math.exp(-beta*dist) - 0.5) 
-            reward_speed = (np.linalg.norm([quad_vel.x_val, quad_vel.y_val, quad_vel.z_val]) - 0.5)
-            reward = reward_dist + reward_speed
-
-    return reward
 
 def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_param=PPO_EPSILON):
     count_steps = 0
@@ -308,11 +303,7 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
 
 
 
-def isDone(reward):
-    done = 0
-    if  reward <= -10:
-        done = 1
-    return done
+
 
 def interpret_action(action):
     scaling_factor = 0.25
@@ -332,6 +323,32 @@ def interpret_action(action):
         quad_offset = (0, 0, -scaling_factor)
     
     return quad_offset
+
+def compute_reward(quad_state, quad_vel, collision_info):
+    thresh_dist = 7
+    beta = 1
+
+    z = -10
+    pts = [np.array([-.55265, -31.9786, -19.0225]), np.array([48.59735, -63.3286, -60.07256]), np.array([193.5974, -55.0786, -46.32256]), np.array([369.2474, 35.32137, -62.5725]), np.array([541.3474, 143.6714, -32.07256])]
+
+    quad_pt = np.array(list((quad_state.x_val, quad_state.y_val, quad_state.z_val)))
+
+    if collision_info.has_collided:
+        reward = -100
+    else:    
+        dist = 10000000
+        for i in range(0, len(pts)-1):
+            dist = min(dist, np.linalg.norm(np.cross((quad_pt - pts[i]), (quad_pt - pts[i+1])))/np.linalg.norm(pts[i]-pts[i+1]))
+
+        #print(dist)
+        if dist > thresh_dist:
+            reward = -10
+        else:
+            reward_dist = (math.exp(-beta*dist) - 0.5) 
+            reward_speed = (np.linalg.norm([quad_vel.x_val, quad_vel.y_val, quad_vel.z_val]) - 0.5)
+            reward = reward_dist + reward_speed
+
+    return reward
 
 
 
