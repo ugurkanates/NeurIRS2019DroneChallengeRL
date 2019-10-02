@@ -115,7 +115,6 @@ def interpret_action(action):
 
 """
 
-def select_action(mean, std):
 
 def isDone(reward):
     done = 0
