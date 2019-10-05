@@ -26,8 +26,8 @@ class ActorCritic(nn.Module):
         
     def forward(self, x):
         value = self.critic(x)
-        x = F.relu(self.act_hidden1(x))
+        x = F.relu(self.actor_hidden1(x))
         mean = torch.clamp(self.mu(x), -1.0, 1.0)
-        var = F.softplus(self.std(x)) + 1e-5 # softplus clamps values between -1 and +1
+        var = F.softplus(self.var(x)) + 1e-5 # softplus clamps values between -1 and +1
         dist  = Normal(mean, var.sqrt())
         return dist, value
