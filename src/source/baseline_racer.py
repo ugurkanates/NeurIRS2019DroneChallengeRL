@@ -5,6 +5,7 @@ import threading
 import time
 import utils
 import numpy as np
+import math
 
 # drone_name should match the name in ~/Document/AirSim/settings.json
 class BaselineRacer(object):
@@ -30,6 +31,8 @@ class BaselineRacer(object):
         self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.02))
         self.is_image_thread_active = False
         self.is_odometry_thread_active = False
+
+        self.MAX_NUMBER_OF_GETOBJECTPOSE_TRIALS = 10 # see https://github.com/microsoft/AirSim-NeurIPS2019-Drone-Racing/issues/38
 
     # loads desired level
     def load_level(self, level_name, sleep_sec = 2.0):
@@ -67,12 +70,9 @@ class BaselineRacer(object):
         self.airsim_client.takeoffAsync().join()
 
     # like takeoffAsync(), but with moveOnSpline()
-    def takeoff_with_moveOnSpline(self, takeoff_height = 0.1):
-        if self.level_name == "ZhangJiaJie_Medium":
-            takeoff_height = 0.3
-
+    def takeoff_with_moveOnSpline(self, takeoff_height = 1.0):
         start_position = self.airsim_client.simGetVehiclePose(vehicle_name=self.drone_name).position
-        takeoff_waypoint = airsim.Vector3r(start_position.x_val, start_position.y_val, -takeoff_height)
+        takeoff_waypoint = airsim.Vector3r(start_position.x_val, start_position.y_val, start_position.z_val-takeoff_height)
 
         self.airsim_client.moveOnSplineAsync([takeoff_waypoint], vel_max=15.0, acc_max=5.0, add_position_constraint=True, add_velocity_constraint=False, 
             add_acceleration_constraint=False, viz_traj=self.viz_traj, viz_traj_color_rgba=self.viz_traj_color_rgba, vehicle_name=self.drone_name).join()
@@ -84,9 +84,20 @@ class BaselineRacer(object):
         # ['Gate0', 'Gate10_21', 'Gate11_23', 'Gate1_3', 'Gate2_5', 'Gate3_7', 'Gate4_9', 'Gate5_11', 'Gate6_13', 'Gate7_15', 'Gate8_17', 'Gate9_19']
         # we sort them by their ibdex of occurence along the race track(N), and ignore the unreal garbage number after the underscore(GARBAGE)
         gate_indices_bad = [int(gate_name.split('_')[0][4:]) for gate_name in gate_names_sorted_bad]
-        gate_indices_correct = sorted(range(len(gate_indices_bad)), key=lambda k:gate_indices_bad[k])
+        gate_indices_correct = sorted(range(len(gate_indices_bad)), key=lambda k: gate_indices_bad[k])
         gate_names_sorted = [gate_names_sorted_bad[gate_idx] for gate_idx in gate_indices_correct]
-        self.gate_poses_ground_truth = [self.airsim_client.simGetObjectPose(gate_name) for gate_name in gate_names_sorted]
+        self.gate_poses_ground_truth = []
+        for gate_name in gate_names_sorted:
+            curr_pose = self.airsim_client.simGetObjectPose(gate_name)
+            counter = 0
+            while (math.isnan(curr_pose.position.x_val) or math.isnan(curr_pose.position.y_val) or math.isnan(curr_pose.position.z_val)) and (counter < self.MAX_NUMBER_OF_GETOBJECTPOSE_TRIALS):
+                print(f"DEBUG: {gate_name} position is nan, retrying...")
+                counter += 1
+                curr_pose = self.airsim_client.simGetObjectPose(gate_name)
+            assert not math.isnan(curr_pose.position.x_val), f"ERROR: {gate_name} curr_pose.position.x_val is still {curr_pose.position.x_val} after {counter} trials"
+            assert not math.isnan(curr_pose.position.y_val), f"ERROR: {gate_name} curr_pose.position.y_val is still {curr_pose.position.y_val} after {counter} trials"
+            assert not math.isnan(curr_pose.position.z_val), f"ERROR: {gate_name} curr_pose.position.z_val is still {curr_pose.position.z_val} after {counter} trials"
+            self.gate_poses_ground_truth.append(curr_pose)
 
     # this is utility function to get a velocity constraint which can be passed to moveOnSplineVelConstraints() 
     # the "scale" parameter scales the gate facing vector accordingly, thereby dictating the speed of the velocity constraint
@@ -127,7 +138,7 @@ class BaselineRacer(object):
             vel_max = 4.0
             acc_max = 1.0
 
-        return self.airsim_client.moveOnSplineAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth], vel_max=30.0, acc_max=15.0, 
+        return self.airsim_client.moveOnSplineAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth], vel_max=vel_max, acc_max=acc_max, 
             add_position_constraint=True, add_velocity_constraint=False, add_acceleration_constraint=False, viz_traj=self.viz_traj, viz_traj_color_rgba=self.viz_traj_color_rgba, vehicle_name=self.drone_name)
 
     def fly_through_all_gates_one_by_one_with_moveOnSplineVelConstraints(self):
@@ -170,7 +181,7 @@ class BaselineRacer(object):
 
         return self.airsim_client.moveOnSplineVelConstraintsAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth], 
                 [self.get_gate_facing_vector_from_quaternion(gate_pose.orientation, scale = speed_through_gate) for gate_pose in self.gate_poses_ground_truth], 
-                vel_max=15.0, acc_max=7.5, 
+                vel_max=vel_max, acc_max=acc_max, 
                 add_position_constraint=True, add_velocity_constraint=True, add_acceleration_constraint=False, 
                 viz_traj=self.viz_traj, viz_traj_color_rgba=self.viz_traj_color_rgba, vehicle_name=self.drone_name)
 
@@ -262,6 +273,6 @@ if __name__ == "__main__":
     parser.add_argument('--planning_and_control_api', type=str, choices=["moveOnSpline", "moveOnSplineVelConstraints"], default="moveOnSpline")
     parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=False)
     parser.add_argument('--enable_viz_image_cv2', dest='viz_image_cv2', action='store_true', default=False)
-    parser.add_argument('--race_tier', type=int, choices=[1,2,3], default=3)
+    parser.add_argument('--race_tier', type=int, choices=[1,2,3], default=1)
     args = parser.parse_args()
     main(args)

@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 import numpy as np
 import gym, gym.spaces, gym.utils, gym.utils.seeding
+import math
 
 
 baseline_racer = BaselineRacer(drone_name="drone_1",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
@@ -47,7 +48,7 @@ print(baseline_racer.airsim_client.simGetVehiclePose())
     i=+1
 """
 #print(baseline_racer.airsim_client.simGetVehiclePose())
-
+#baseline_racer.get_ground_truth_gate_poses()
 
 #baseline_racer.airsim_client.moveToPositionAsync(8.887084007263184,18.478761672973633,2.0199999809265137, 5).join()
 ### DETECT device
@@ -76,7 +77,22 @@ TARGET_REWARD       = 2500
 
 
 #Number of Actions explained
+#takes baseline_racer object not client object
+def returnGateLocationsNumpy(obje_of_racer):
+    gate_names_sorted_bad = sorted(obje_of_racer.airsim_client.simListSceneObjects("Gate.*"))
+    # In building 99, for example, gate_names_sorted_bad would be ['Gate0', 'Gate10_21', 'Gate11_23', 'Gate1_3', 'Gate2_5', 'Gate3_7', 'Gate4_9', 'Gate5_11', 'Gate6_13', 'Gate7_15', 'Gate8_17', 'Gate9_19']
+    # number after underscore is unreal garbage. and leading zeros are missing, so the following lines fix the same
+    gate_indices_bad = [int(gate_name.split('_')[0][4:]) for gate_name in gate_names_sorted_bad]
+    gate_indices_correct = sorted(range(len(gate_indices_bad)), key=lambda k:gate_indices_bad[k])
+    gate_names_sorted = [gate_names_sorted_bad[gate_idx] for gate_idx in gate_indices_correct]
+    gate_poses = [obje_of_racer.airsim_client.simGetObjectPose(gate_name) for gate_name in gate_names_sorted]
+    npArray = np.ones((len(gate_poses),3),dtype=np.float32)
+    for i in range(0, len(gate_poses)-1):
+        npArray[i] = np.array([gate_poses[i].position.x_val,gate_poses[i].position.y_val,gate_poses[i].position.z_val])
+        
 
+    return npArray
+        
 """
 ACTIONS SHOULD BE CONTINOUS INSTEAD OF SCALING FACTOR ? just use nn output
 def interpret_action(action):
@@ -99,6 +115,48 @@ def interpret_action(action):
 """
 
 # Number of Inputs explained
+def compute_reward(current_position,current_linear_velocity, collision_info,pts):
+
+    thresh_dist = 7
+    beta = 1
+
+    #now we dont know how to know if we passed gate* 
+    # maybe there is gate passed function
+    # else or also we need to get distance to gate so more rewards + reward
+    # things i still didnt use like time,acc, other drone distance behind and forward ,etc 
+
+    if collision_info.has_collided:
+        reward = -100 #this is very bad ! disqualification .....
+    else:    
+        dist = 10000000
+        for i in range(0, len(pts)-1):
+            dist = min(dist, np.linalg.norm(np.cross((current_position - pts[i]), (current_position - pts[i+1])))/np.linalg.norm(pts[i]-pts[i+1]))
+
+        print("Distance the closest gate = ",dist,"\n")
+        if dist > thresh_dist:
+            reward = -10
+        else:
+            reward_dist = (math.exp(-beta*dist) - 0.5) 
+            reward_speed = (np.linalg.norm([current_linear_velocity.x_val, current_linear_velocity.y_val, current_linear_velocity.z_val]) - 0.5)
+            reward = reward_dist + reward_speed
+
+    return float(reward)
+
+
+
+def compute_gae(next_value, rewards, masks, values, gamma=GAMMA, lam=GAE_LAMBDA):
+    values = values + [next_value]
+    gae = 0
+    returns = []
+    for step in reversed(range(len(rewards))):
+        delta = rewards[step] + gamma * values[step + 1] * masks[step] - values[step]
+        gae = delta + gamma * lam * masks[step] * gae
+        # prepend to get correct order back
+        returns.insert(0, gae + values[step])
+    return returns
+
+
+
 
 """
     position = Vector3r()3
@@ -139,6 +197,7 @@ early_stop = False
 # State computation
 # our info (LINVELXYZ+OURXYZ ) + enemy info(LINVELXYZ+XYZ)
 state = np.ones(number_of_inputs)
+pts = returnGateLocationsNumpy(baseline_racer)
 
 # ENV Reset function cagirilmalixd
 while not early_stop:
@@ -162,7 +221,9 @@ while not early_stop:
         #view(-1,1) of tensor to not mess dimensions.
         dist, value = model(state)
 
-        action = dist.sample()
+        ##action = dist.sample()
+        action = torch.clamp(dist.sample(), -1.0, 1.0)
+
         # each state, reward, done is a list of results from each parallel environment
 
         #quad_offset = interpret_action(actions)
@@ -178,7 +239,11 @@ while not early_stop:
          ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
 
         pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
+        pose_object_temp_numpy = np.array([pose_object_temp.x_val,pose_object_temp.y_val,pose_object_temp.z_val])
+
         linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
+       # linear_vel_object_temp_numpy = np.array([linear_vel_object_temp.x_val,linear_vel_object_temp.y_val,linear_vel_object_temp.z_val])
+
         angular_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_velocity
         linear_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_acceleration
         angular_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_acceleration
@@ -196,7 +261,10 @@ while not early_stop:
         enemy.position.x_val,enemy.position.y_val,enemy.position.z_val,enemy.linear_velocity.x_val,linear_vel_object_temp.y_val,linear_vel_object_temp.z_val
         ])
 
-        reward =np.array([-5]) # compute_reward(next_state, quad_vel, collision_info)
+        #reward =np.array([-5]) # compute_reward(next_state, quad_vel, collision_info)
+        collision_info = baseline_racer.airsim_client.simGetCollisionInfo()
+        reward = compute_reward(pose_object_temp_numpy,linear_vel_object_temp, collision_info,pts)
+        reward = np.array([reward])
         done = isDone(reward)
         print('Action, Reward, Done:', action, reward, done)
 
@@ -206,6 +274,9 @@ while not early_stop:
         log_prob = dist.log_prob(action)
         log_probs.append(log_prob)
         values.append(value)
+        #reward = torch.from_numpy(np.array(reward))
+        #reward = torch.as_tensor(reward)
+
         rewards.append(torch.FloatTensor(reward).unsqueeze(1).to(device))
         masks.append(torch.FloatTensor(1 - done).unsqueeze(1).to(device))
             
@@ -232,7 +303,7 @@ while not early_stop:
 
     if train_epoch % TEST_EPOCHS == 0:
         test_reward = np.mean([test_env(env, model, device) for _ in range(NUM_TESTS)])
-        writer.add_scalar("test_rewards", test_reward, frame_idx)
+        #writer.add_scalar("test_rewards", test_reward, frame_idx)
         print('Frame %s. reward: %s' % (frame_idx, test_reward))
             # Save a checkpoint every time we achieve a best reward
         if best_reward is None or best_reward < test_reward:
@@ -324,41 +395,3 @@ def interpret_action(action):
     
     return quad_offset
 
-def compute_reward(quad_state, quad_vel, collision_info):
-    thresh_dist = 7
-    beta = 1
-
-    z = -10
-    pts = [np.array([-.55265, -31.9786, -19.0225]), np.array([48.59735, -63.3286, -60.07256]), np.array([193.5974, -55.0786, -46.32256]), np.array([369.2474, 35.32137, -62.5725]), np.array([541.3474, 143.6714, -32.07256])]
-
-    quad_pt = np.array(list((quad_state.x_val, quad_state.y_val, quad_state.z_val)))
-
-    if collision_info.has_collided:
-        reward = -100
-    else:    
-        dist = 10000000
-        for i in range(0, len(pts)-1):
-            dist = min(dist, np.linalg.norm(np.cross((quad_pt - pts[i]), (quad_pt - pts[i+1])))/np.linalg.norm(pts[i]-pts[i+1]))
-
-        #print(dist)
-        if dist > thresh_dist:
-            reward = -10
-        else:
-            reward_dist = (math.exp(-beta*dist) - 0.5) 
-            reward_speed = (np.linalg.norm([quad_vel.x_val, quad_vel.y_val, quad_vel.z_val]) - 0.5)
-            reward = reward_dist + reward_speed
-
-    return reward
-
-
-
-def compute_gae(next_value, rewards, masks, values, gamma=GAMMA, lam=GAE_LAMBDA):
-    values = values + [next_value]
-    gae = 0
-    returns = []
-    for step in reversed(range(len(rewards))):
-        delta = rewards[step] + gamma * values[step + 1] * masks[step] - values[step]
-        gae = delta + gamma * lam * masks[step] * gae
-        # prepend to get correct order back
-        returns.insert(0, gae + values[step])
-    return returns
