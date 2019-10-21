@@ -129,11 +129,11 @@ def interpret_action(action):
 
 # Number of Inputs explained
 def compute_reward(current_position,current_linear_velocity, collision_info,pts):
-
+ #TIME OUT lazim
     thresh_dist = 5
     minimum_dist = 0.5
     beta = 1
-
+    currentGateIndexItShouldMoveFor = 0
     #now we dont know how to know if we passed gate* 
     # maybe there is gate passed function
     # else or also we need to get distance to gate so more rewards + reward
@@ -161,20 +161,25 @@ def compute_reward(current_position,current_linear_velocity, collision_info,pts)
         #dist = min(dist, np.linalg.norm(np.cross((current_position - pts[0]), (current_position - pts[0+1])))/np.linalg.norm(pts[0]-pts[0+1]))
 
         print("Distance the closest gate and its distance = ",minGate,dist,"\n")
-        if dist < minimum_dist:
+        if(currentGateIndexItShouldMoveFor != minGate):
+            reward = -100
+            print("Oh shit , moving wrong gate direction ! I should be going ",currentGateIndexItShouldMoveFor,"but im going",minGate,"\n")
+            # Moving direction of wrong gate shit thing , it shouldnt go !
+        elif dist < minimum_dist:
             reward = 50
             if(isPassedGate(current_position,pts[minGate]) == True):
                 print("If deletion of Gate is going to be it?\n")
                 reward += 100 #150 total?
                 print("before gate deletion and len",pts,len(pts),"\n")
-                pts = np.delete(pts,minGate)
+                #pts = np.delete(pts,minGate)
+                currentGateIndexItShouldMoveFor += 1
                 print("after gate deletion and len",pts,len(pts),"\n")
                 #global disari cikiyor mu
-
-
         elif dist > thresh_dist:
+            print("Distance > threst_dist","\n")
             reward = -10
         else:
+            print("Distance is smaller than threst distance but not good as minimum_dist \n")
             reward_dist = (math.exp(-beta*dist) - 0.5) 
             reward_speed = (np.linalg.norm([current_linear_velocity.x_val, current_linear_velocity.y_val, current_linear_velocity.z_val]) - 0.5)
             reward = reward_dist + reward_speed
@@ -303,14 +308,14 @@ def normalize(x):
 
 def test_env(baseline_racer, model, device, deterministic=True):
     #env needs to be resetted
-    
+    timeout = 100000 # 7 min (420sec)  / 0.1(sec one move) = didnt work it yet so made it 42000   other drone do it like 60k
     baseline_racer.reset_race()
     baseline_racer.start_race(3)
     baseline_racer.takeoffAsync()
     state = np.ones(number_of_inputs)
     done = 0
     total_reward = 0
-    while not done:
+    while not done and timeout>= 0:
         state = torch.FloatTensor(state).to(device).unsqueeze(0)
         dist, _ = model(state)
         action = torch.clamp(dist.sample(), -1.0, 1.0)
@@ -323,7 +328,9 @@ def test_env(baseline_racer, model, device, deterministic=True):
             action = torch.clamp(dist.sample(),-1.0,1.0)
 
 
-        
+        actx = action.data.cpu().numpy()
+        baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.1).join()
+        time.sleep(0.5) # how much to sleep?
         pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
         pose_object_temp_numpy = np.array([pose_object_temp.x_val,pose_object_temp.y_val,pose_object_temp.z_val])
         linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
@@ -347,9 +354,11 @@ def test_env(baseline_racer, model, device, deterministic=True):
         reward = compute_reward(pose_object_temp_numpy,linear_vel_object_temp, collision_info,pts)
         reward = np.array([reward])
         done = isDone(reward)
-        print('TEST ENVIROMENT - Action, Reward, Done:', action, reward, done)
+        print('TEST ENVIROMENT - Action, Reward, Done:', action, reward, done,"\n")
+        print("Remaining time in this test",timeout,"\n")
         state = next_state
         total_reward += reward
+        timeout -= 1
     return total_reward
 
 #creating of input something
