@@ -32,7 +32,6 @@ class BaselineRacer(object):
         self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.02))
         self.is_image_thread_active = False
         self.is_odometry_thread_active = False
-        self.imageNumber = 0
 
         #for state used in RL
         self.current_position = None
@@ -201,8 +200,7 @@ class BaselineRacer(object):
         response = self.airsim_client_images.simGetImages(request)
         img_rgb_1d = np.fromstring(response[0].image_data_uint8, dtype=np.uint8) 
         img_rgb = img_rgb_1d.reshape(response[0].height, response[0].width, 3)
-        name = "%s_image_%d.png" % ("args.name",self.imageNumber)
-        self.imageNumber += 1
+        name = time.strftime("%Y%m%d-%H%M%S") + ".png"
         savePath = os.path.join('.', 'checkpoints\screenshots', name)
         cv2.imwrite(savePath,img_rgb)
         """if self.viz_image_cv2:
