@@ -11,6 +11,9 @@ from torch.distributions import Normal
 import numpy as np
 import gym, gym.spaces, gym.utils, gym.utils.seeding
 import math
+from tensorboardX import SummaryWriter # using log kinda of thing? , though need to check for ctrl+c early crash situtations dont save yet.
+import os # for saving model file
+
 
 
 
@@ -31,7 +34,7 @@ PPO_EPSILON         = 0.2
 CRITIC_DISCOUNT     = 0.5
 ENTROPY_BETA        = 0.001
 PPO_STEPS           = 25  #256
-MINI_BATCH_SIZE     = 64
+MINI_BATCH_SIZE     = 5 #64 i guess this was supposed to be 256/64 = 4 ? ppo_iter like frame our state is 25 element.
 PPO_EPOCHS          = 10
 TEST_EPOCHS         = 10
 NUM_TESTS           = 10
@@ -167,14 +170,22 @@ def compute_reward(current_position,current_linear_velocity, collision_info,pts)
             # Moving direction of wrong gate shit thing , it shouldnt go !
         elif dist < minimum_dist:
             reward = 50
-            if(isPassedGate(current_position,pts[minGate]) == True):
+            print("If deletion of Gate is going to be it?\n")
+            reward += 100 #150 total?
+            print("before gate deletion and len",pts,len(pts),"\n")
+            #pts = np.delete(pts,minGate)
+            currentGateIndexItShouldMoveFor += 1
+            print("after gate deletion and len",pts,len(pts),"\n")
+
+            """if(isPassedGate(current_position,pts[minGate]) == True):
                 print("If deletion of Gate is going to be it?\n")
                 reward += 100 #150 total?
                 print("before gate deletion and len",pts,len(pts),"\n")
                 #pts = np.delete(pts,minGate)
                 currentGateIndexItShouldMoveFor += 1
                 print("after gate deletion and len",pts,len(pts),"\n")
-                #global disari cikiyor mu
+                #global disari cikiyor mu"""
+          
         elif dist > thresh_dist:
             print("Distance > threst_dist","\n")
             reward = -10
@@ -219,6 +230,8 @@ def compute_gae(next_value, rewards, masks, values, gamma=GAMMA, lam=GAE_LAMBDA)
 """
 def ppo_iter(states, actions, log_probs, returns, advantage):
     batch_size = states.size(0)
+    #print("hey this is probably the wrong part, whats is resultf of this \n")
+    #print(batch_size,"--- // ",MINI_BATCH_SIZE,"\n")
     # generates random mini-batches until we have covered the full batch
     for _ in range(batch_size // MINI_BATCH_SIZE):
         rand_ids = np.random.randint(0, batch_size, MINI_BATCH_SIZE)
@@ -266,13 +279,16 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
             sum_entropy += entropy
             
             count_steps += 1
+            #print("Count steps for debug \n",count_steps)
+
     
-    #writer.add_scalar("returns", sum_returns / count_steps, frame_idx)
-    #writer.add_scalar("advantage", sum_advantage / count_steps, frame_idx)
-    #writer.add_scalar("loss_actor", sum_loss_actor / count_steps, frame_idx)
-    #writer.add_scalar("loss_critic", sum_loss_critic / count_steps, frame_idx)
-    #writer.add_scalar("entropy", sum_entropy / count_steps, frame_idx)
-    #writer.add_scalar("loss_total", sum_loss_total / count_steps, frame_idx)
+    #print("Count steps for debug \n",count_steps)
+    writer.add_scalar("returns", sum_returns / count_steps, frame_idx)
+    writer.add_scalar("advantage", sum_advantage / count_steps, frame_idx)
+    writer.add_scalar("loss_actor", sum_loss_actor / count_steps, frame_idx)
+    writer.add_scalar("loss_critic", sum_loss_critic / count_steps, frame_idx)
+    writer.add_scalar("entropy", sum_entropy / count_steps, frame_idx)
+    writer.add_scalar("loss_total", sum_loss_total / count_steps, frame_idx)
 
 """
 
@@ -306,12 +322,16 @@ def normalize(x):
     x /= (x.std() + 1e-8)
     return x
 
-def test_env(baseline_racer, model, device, deterministic=True):
+def test_env(baseline_racer, model, device,testIndex, deterministic=True):
     #env needs to be resetted
-    timeout = 100000 # 7 min (420sec)  / 0.1(sec one move) = didnt work it yet so made it 42000   other drone do it like 60k
+    print("Resetted Again to start ",testIndex,"test.\n")
+    timeout = 500 # 7 min (420sec)  / 0.1(sec one move) = didnt work it yet so made it 42000   other drone do it like 60k
     baseline_racer.reset_race()
     baseline_racer.start_race(3)
-    baseline_racer.takeoffAsync()
+    #baseline_racer.start_odometry_callback_thread()
+   
+    #baseline_racer.takeoffAsync()
+    baseline_racer.takeoff_with_moveOnSpline()
     state = np.ones(number_of_inputs)
     done = 0
     total_reward = 0
@@ -324,20 +344,27 @@ def test_env(baseline_racer, model, device, deterministic=True):
             else torch.clamp(dist.sample(),-1.0,1.0)"""
         if(deterministic == True):
             action = dist.mean.detach().cpu().numpy()[0]
+            actx = action
+            baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0], quad_vel.y_val+actx[1], quad_vel.z_val+actx[2],0.1).join()
+
         else:
             action = torch.clamp(dist.sample(),-1.0,1.0)
+            actx = action.data.cpu().numpy()
+            baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.1).join()
 
 
-        actx = action.data.cpu().numpy()
-        baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.1).join()
-        time.sleep(0.5) # how much to sleep?
-        pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
+
+
+        #time.sleep(0.5) # how much to sleep?
+        pose_object_temp = baseline_racer.current_position
         pose_object_temp_numpy = np.array([pose_object_temp.x_val,pose_object_temp.y_val,pose_object_temp.z_val])
-        linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
-        angular_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_velocity
-        linear_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_acceleration
-        angular_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_acceleration
-        enemy = baseline_racer.airsim_client.simGetGroundTruthKinematics("drone_2")
+
+        linear_vel_object_temp = baseline_racer.current_linear_velocity
+        angular_vel_object_temp = baseline_racer.current_angular_velocity
+        linear_acc_object_temp = baseline_racer.current_linear_acceleration
+        angular_acc_object_temp = baseline_racer.current_angular_acceleration
+
+        enemy = baseline_racer.current_enemy
 
 
 
@@ -354,11 +381,14 @@ def test_env(baseline_racer, model, device, deterministic=True):
         reward = compute_reward(pose_object_temp_numpy,linear_vel_object_temp, collision_info,pts)
         reward = np.array([reward])
         done = isDone(reward)
+        if(done == 1):
+            print("DONE ------ DONE \n")
         print('TEST ENVIROMENT - Action, Reward, Done:', action, reward, done,"\n")
         print("Remaining time in this test",timeout,"\n")
         state = next_state
         total_reward += reward
         timeout -= 1
+    #baseline_racer.stop_odometry_callback_thread()    
     return total_reward
 
 #creating of input something
@@ -385,10 +415,14 @@ state = np.ones(number_of_inputs)
 ## starting
 baseline_racer.load_level("Soccer_Field_Easy")
 baseline_racer.initialize_drone()
+baseline_racer.start_odometry_callback_thread()
+baseline_racer.start_image_callback_thread()
+
 pts = returnGateLocationsNumpy(baseline_racer)
 
-baseline_racer.start_race(3)
-baseline_racer.takeoffAsync()
+#baseline_racer.start_race(3)
+#baseline_racer.takeoffAsync()
+writer = SummaryWriter(comment="ppo_" + "args.name") # index of each training. args.name args = parser.parse_args()
 
 
 
@@ -396,7 +430,8 @@ baseline_racer.takeoffAsync()
 
 # ENV Reset function cagirilmalixd
 while not early_stop:
-    
+    baseline_racer.reset_race()
+   
     log_probs = []
     values    = []
     states    = []
@@ -406,8 +441,15 @@ while not early_stop:
     #state = np.zeros(number_of_inputs) ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
     #state = gym.spaces.box(low=-stateLimits,high=stateLimits,dtype=float32)
     
-    pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
-    linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
+
+    #pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
+    #linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
+
+    #maybe time.sleep here for 0.1?
+    baseline_racer.start_race(3)
+    #baseline_racer.takeoffAsync()
+    baseline_racer.takeoff_with_moveOnSpline()
+
 
 
     for stepNumber in range(PPO_STEPS):
@@ -425,12 +467,12 @@ while not early_stop:
         # Clipping the action about what? which parameters would be good
         # LET just say 1 second for now?
        
-        quad_vel = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
+        quad_vel = baseline_racer.current_linear_velocity  #.getMultirotorState().kinematics_estimated.linear_velocity
         actx = action.data.cpu().numpy()
         baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.1).join()
-        time.sleep(0.5) # how much to sleep?
+        #time.sleep(0.5) # how much to sleep?
 
-        #THIS IS WRONG ------------------------- next_state = np.zeros(number_of_inputs)
+        """#THIS IS WRONG ------------------------- next_state = np.zeros(number_of_inputs)
          ## our x,y,z position, our x,y,z linear vel , enemy xyz pos and vel
 
         pose_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.position
@@ -442,7 +484,17 @@ while not early_stop:
         angular_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_velocity
         linear_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_acceleration
         angular_acc_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.angular_acceleration
-        enemy = baseline_racer.airsim_client.simGetGroundTruthKinematics("drone_2")
+        enemy = baseline_racer.airsim_client.simGetGroundTruthKinematics("drone_2")"""
+
+        pose_object_temp = baseline_racer.current_position
+        pose_object_temp_numpy = np.array([pose_object_temp.x_val,pose_object_temp.y_val,pose_object_temp.z_val])
+
+        linear_vel_object_temp = baseline_racer.current_linear_velocity
+        angular_vel_object_temp = baseline_racer.current_angular_velocity
+        linear_acc_object_temp = baseline_racer.current_linear_acceleration
+        angular_acc_object_temp = baseline_racer.current_angular_acceleration
+
+        enemy = baseline_racer.current_enemy
 
         # HIGH PROBABILTY just using [pose_object_temp] +  does this already but later will try or cat [] this saw on somewhere whileloking
         # maybe not because these arent numpy lolz
@@ -496,16 +548,17 @@ while not early_stop:
 
     ppo_update(frame_idx, states, actions, log_probs, returns, advantage)
     train_epoch += 1
+    #baseline_racer.stop_odometry_callback_thread()
 
     if train_epoch % TEST_EPOCHS == 0:
-        test_reward = np.mean([test_env(baseline_racer, model, device) for _ in range(NUM_TESTS)])
-        #writer.add_scalar("test_rewards", test_reward, frame_idx)
+        test_reward = np.mean([test_env(baseline_racer, model, device,testIndex) for testIndex in range(NUM_TESTS)])
+        writer.add_scalar("test_rewards", test_reward, frame_idx)
         print('Frame %s. reward: %s' % (frame_idx, test_reward))
             # Save a checkpoint every time we achieve a best reward
         if best_reward is None or best_reward < test_reward:
             if best_reward is not None:
                 print("Best reward updated: %.3f -> %.3f" % (best_reward, test_reward))
-                name = "%s_best_%+.3f_%d.dat" % (args.name, test_reward, frame_idx)
+                name = "%s_best_%+.3f_%d.dat" % ("args.name", test_reward, frame_idx)
                 fname = os.path.join('.', 'checkpoints', name)
                 torch.save(model.state_dict(), fname)
             best_reward = test_reward
