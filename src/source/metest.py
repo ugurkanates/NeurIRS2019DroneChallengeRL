@@ -413,7 +413,8 @@ state = np.ones(number_of_inputs)
 
 
 ## starting
-baseline_racer.load_level("Soccer_Field_Easy")
+#baseline_racer.load_level("Soccer_Field_Easy")
+baseline_racer.load_level("Qualifier_Tier_1")
 baseline_racer.initialize_drone()
 baseline_racer.start_odometry_callback_thread()
 baseline_racer.start_image_callback_thread()
