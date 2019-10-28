@@ -9,11 +9,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Normal
 import numpy as np
-import gym, gym.spaces, gym.utils, gym.utils.seeding
+#import gym, gym.spaces, gym.utils, gym.utils.seeding
 import math
 from tensorboardX import SummaryWriter # using log kinda of thing? , though need to check for ctrl+c early crash situtations dont save yet.
 import os # for saving model file
-
+import glob # for finding latest file in checkpoints folrdr
 
 
 
@@ -39,6 +39,7 @@ PPO_EPOCHS          = 10
 TEST_EPOCHS         = 10
 NUM_TESTS           = 10
 TARGET_REWARD       = 2500
+LOAD_MODEL = True
 
 
 baseline_racer = BaselineRacer(drone_name="drone_1",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
@@ -327,7 +328,7 @@ def test_env(baseline_racer, model, device,testIndex, deterministic=True):
     print("Resetted Again to start ",testIndex,"test.\n")
     timeout = 500 # 7 min (420sec)  / 0.1(sec one move) = didnt work it yet so made it 42000   other drone do it like 60k
     baseline_racer.reset_race()
-    baseline_racer.start_race(3)
+    baseline_racer.start_race(1)
     #baseline_racer.start_odometry_callback_thread()
    
     #baseline_racer.takeoffAsync()
@@ -396,6 +397,10 @@ number_of_inputs = 21 # for now its beta phase , linear velocity of our drone an
 number_of_actions = 3 # it was 7 but x,y,z makes more sense than x+,x- etc. hovering action is not neeeded for now?
 # also Timing could be a output that later on but now drone will move 1second fixed or 0.5 second or 1.5 second 
 model = ActorCritic(number_of_inputs,number_of_actions,HIDDEN_SIZE).to(device)
+if(LOAD_MODEL == True):
+    findListedFile = glob.glob(os.getcwd()+"/checkpoints/*")
+    latest_model_file_name = max(findListedFile,key=os.path.getctime)
+    model.load_state_dict(torch.load(latest_model_file_name))
 print(model)
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
@@ -413,8 +418,7 @@ state = np.ones(number_of_inputs)
 
 
 ## starting
-#baseline_racer.load_level("Soccer_Field_Easy")
-baseline_racer.load_level("Qualifier_Tier_1")
+baseline_racer.load_level("Soccer_Field_Easy")
 baseline_racer.initialize_drone()
 baseline_racer.start_odometry_callback_thread()
 baseline_racer.start_image_callback_thread()
@@ -447,7 +451,7 @@ while not early_stop:
     #linear_vel_object_temp = baseline_racer.airsim_client.getMultirotorState().kinematics_estimated.linear_velocity
 
     #maybe time.sleep here for 0.1?
-    baseline_racer.start_race(3)
+    baseline_racer.start_race(1)
     #baseline_racer.takeoffAsync()
     baseline_racer.takeoff_with_moveOnSpline()
 
