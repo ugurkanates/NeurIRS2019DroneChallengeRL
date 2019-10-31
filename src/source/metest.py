@@ -33,15 +33,15 @@ GAE_LAMBDA          = 0.95
 PPO_EPSILON         = 0.2
 CRITIC_DISCOUNT     = 0.5
 ENTROPY_BETA        = 0.001
-PPO_STEPS           = 25  #256
-MINI_BATCH_SIZE     = 5 #64 i guess this was supposed to be 256/64 = 4 ? ppo_iter like frame our state is 25 element.
+PPO_STEPS           = 128  #256
+MINI_BATCH_SIZE     = 32 #64 i guess this was supposed to be 256/64 = 4 ? ppo_iter like frame our state is 25 element.
 PPO_EPOCHS          = 10
 TEST_EPOCHS         = 10
 NUM_TESTS           = 10
 TARGET_REWARD       = 2500
-LOAD_MODEL = True
+LOAD_MODEL = False
 
-
+currentGateIndexItShouldMoveFor = 0
 baseline_racer = BaselineRacer(drone_name="drone_1",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
 #baseline_racer2 = BaselineRacer("drone_2",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
 
@@ -137,7 +137,7 @@ def compute_reward(current_position,current_linear_velocity, collision_info,pts)
     thresh_dist = 5
     minimum_dist = 0.5
     beta = 1
-    currentGateIndexItShouldMoveFor = 0
+    global currentGateIndexItShouldMoveFor
     #now we dont know how to know if we passed gate* 
     # maybe there is gate passed function
     # else or also we need to get distance to gate so more rewards + reward
@@ -294,7 +294,7 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
 """
 
  
-stonegodYesterday at 11:44 PM
+#stonegodYesterday at 11:44 PM
 if( bb.ix <= p.x && p.x <= bb.ax && bb.iy <= p.y && p.y <= bb.ay ) {
     // Point is in bounding box
 }
@@ -336,6 +336,7 @@ def test_env(baseline_racer, model, device,testIndex, deterministic=True):
     state = np.ones(number_of_inputs)
     done = 0
     total_reward = 0
+    currentGateIndexItShouldMoveFor = 0
     while not done and timeout>= 0:
         state = torch.FloatTensor(state).to(device).unsqueeze(0)
         dist, _ = model(state)
@@ -454,7 +455,7 @@ while not early_stop:
     baseline_racer.start_race(1)
     #baseline_racer.takeoffAsync()
     baseline_racer.takeoff_with_moveOnSpline()
-
+    currentGateIndexItShouldMoveFor = 0
 
 
     for stepNumber in range(PPO_STEPS):
