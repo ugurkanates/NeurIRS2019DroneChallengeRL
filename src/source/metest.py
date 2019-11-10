@@ -33,8 +33,8 @@ GAE_LAMBDA          = 0.95
 PPO_EPSILON         = 0.2
 CRITIC_DISCOUNT     = 0.5
 ENTROPY_BETA        = 0.001
-PPO_STEPS           = 128  #256
-MINI_BATCH_SIZE     = 32 #64 i guess this was supposed to be 256/64 = 4 ? ppo_iter like frame our state is 25 element.
+PPO_STEPS           = 1024  #256
+MINI_BATCH_SIZE     = 256 #64 i guess this was supposed to be 256/64 = 4 ? ppo_iter like frame our state is 25 element.
 PPO_EPOCHS          = 10
 TEST_EPOCHS         = 10
 NUM_TESTS           = 10
@@ -42,6 +42,7 @@ TARGET_REWARD       = 2500
 LOAD_MODEL = False
 
 currentGateIndexItShouldMoveFor = 0
+distance_last_step = 0
 baseline_racer = BaselineRacer(drone_name="drone_1",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
 #baseline_racer2 = BaselineRacer("drone_2",viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0])
 
@@ -83,10 +84,10 @@ def isPassedGate(posOfDrone,middleCoordinatesGate,threesholdDensityGate = 0.5):
     #not even sure 0.3 is correct just testing if? 
     # maybe later can calculate via some testing on move functions and distance
 
-    right_x = middleCoordinatesGate[0] + 0.3
-    left_x = middleCoordinatesGate[0] -0.3
-    up_y = middleCoordinatesGate[1] + 0.3
-    down_y = middleCoordinatesGate[1] -0.3
+    right_x = middleCoordinatesGate[0] + 0.5
+    left_x = middleCoordinatesGate[0] -0.5
+    up_y = middleCoordinatesGate[1] + 0.5
+    down_y = middleCoordinatesGate[1] -0.5
 
     if( left_x <= posOfDrone[0] and right_x >= posOfDrone[0] and down_y <= posOfDrone[1] and up_y >= posOfDrone[1]):
         return True
@@ -137,65 +138,76 @@ def compute_reward(current_position,current_linear_velocity, collision_info,pts)
     thresh_dist = 5
     minimum_dist = 0.5
     beta = 1
+    reward = 0
     global currentGateIndexItShouldMoveFor
+    global distance_last_step
     #now we dont know how to know if we passed gate* 
     # maybe there is gate passed function
     # else or also we need to get distance to gate so more rewards + reward
     # things i still didnt use like time,acc, other drone distance behind and forward ,etc 
 
     if collision_info.has_collided:
-        reward = -100 #this is very bad ! disqualification .....
-    else:    
-        dist = 10000000
+        reward = -1 #this is very bad ! disqualification .....
+   
+    dist = 1000
 
-        minGate = 0
-        distOld = dist
-        if(len(pts) == 0):
-            #means all gates are removed?
-            print("All gates passed? \n")
-            #BEFORE REMOVING GATES does we remove just if it passes ?or like wait for a few rewards to get that high reward then remove it? like maybe its negatively or
-            # times (10 times to get positive)
-            return 1000
-        for i in range(0, len(pts)-1):
-            dist = min(dist, np.linalg.norm(np.cross((current_position - pts[i]), (current_position - pts[i+1])))/np.linalg.norm(pts[i]-pts[i+1]))
-            if(dist < distOld):
-                distOld = dist
-                minGate = i
+    minGate = 0
+    distCurrent = dist
 
-        #dist = min(dist, np.linalg.norm(np.cross((current_position - pts[0]), (current_position - pts[0+1])))/np.linalg.norm(pts[0]-pts[0+1]))
+    if(currentGateIndexItShouldMoveFor  == len(pts)-1):
+        #means all gates are removed?
+        #Control if index are correct -1 ? is correct
+        print("All gates passed? \n")
+        #BEFORE REMOVING GATES does we remove just if it passes ?or like wait for a few rewards to get that high reward then remove it? like maybe its negatively or
+        # times (10 times to get positive)
+        return 100 
+    for i in range(0, len(pts)-1):
+        dist = min(dist, np.linalg.norm(np.cross((current_position - pts[i]), (current_position - pts[i+1])))/np.linalg.norm(pts[i]-pts[i+1]))
+        if(dist < distCurrent):
+            distCurrent = dist
+            minGate = i
 
-        print("Distance the closest gate and its distance = ",minGate,dist,"\n")
-        if(currentGateIndexItShouldMoveFor != minGate):
-            reward = -100
-            print("Oh shit , moving wrong gate direction ! I should be going ",currentGateIndexItShouldMoveFor,"but im going",minGate,"\n")
-            # Moving direction of wrong gate shit thing , it shouldnt go !
-        elif dist < minimum_dist:
-            reward = 50
+    #dist = min(dist, np.linalg.norm(np.cross((current_position - pts[0]), (current_position - pts[0+1])))/np.linalg.norm(pts[0]-pts[0+1]))
+
+    print("Distance the closest gate and its distance = ",minGate,dist,"\n")
+
+    if(currentGateIndexItShouldMoveFor != minGate and ( abs(currentGateIndexItShouldMoveFor-minGate) > 1 )):
+        reward = -1
+        print("Oh shit , moving wrong gate direction ! I should be going ",currentGateIndexItShouldMoveFor,"but im going",minGate,"\n")
+        # Moving direction of wrong gate shit thing , it shouldnt go !
+    elif distCurrent < minimum_dist: #means passed gate
+        reward = 10
+        print("If deletion of Gate is going to be it?\n")
+        #reward += 100 #150 total?
+        print("before gate it should go deletion and len",currentGateIndexItShouldMoveFor,"\n")
+        #pts = np.delete(pts,minGate)
+        currentGateIndexItShouldMoveFor += 1
+        distance_last_step = distCurrent
+        print("after gate it should go deletion and len",currentGateIndexItShouldMoveFor,"\n")
+
+        """if(isPassedGate(current_position,pts[minGate]) == True):
             print("If deletion of Gate is going to be it?\n")
             reward += 100 #150 total?
             print("before gate deletion and len",pts,len(pts),"\n")
             #pts = np.delete(pts,minGate)
             currentGateIndexItShouldMoveFor += 1
             print("after gate deletion and len",pts,len(pts),"\n")
-
-            """if(isPassedGate(current_position,pts[minGate]) == True):
-                print("If deletion of Gate is going to be it?\n")
-                reward += 100 #150 total?
-                print("before gate deletion and len",pts,len(pts),"\n")
-                #pts = np.delete(pts,minGate)
-                currentGateIndexItShouldMoveFor += 1
-                print("after gate deletion and len",pts,len(pts),"\n")
-                #global disari cikiyor mu"""
-          
-        elif dist > thresh_dist:
-            print("Distance > threst_dist","\n")
-            reward = -10
-        else:
-            print("Distance is smaller than threst distance but not good as minimum_dist \n")
-            reward_dist = (math.exp(-beta*dist) - 0.5) 
-            reward_speed = (np.linalg.norm([current_linear_velocity.x_val, current_linear_velocity.y_val, current_linear_velocity.z_val]) - 0.5)
-            reward = reward_dist + reward_speed
-            
+            #global disari cikiyor mu"""
+    
+    elif distance_last_step > distCurrent:
+        #it get closed to target gate
+        print("it get closed to target gate","\n")
+        reward = 3 
+        if(distCurrent < thresh_dist):
+            reward  += 1
+    elif distCurrent < thresh_dist:
+           reward = 1
+    """else:
+        print("Distance is smaller than threst distance but not good as minimum_dist \n")
+        reward_dist = (math.exp(-beta*dist) - 0.5) 
+        reward_speed = (np.linalg.norm([current_linear_velocity.x_val, current_linear_velocity.y_val, current_linear_velocity.z_val]) - 0.5)
+        reward = reward_dist + reward_speed"""
+    distance_last_step = distCurrent        
     print("Current Reward",reward,"\n")
     return float(reward)
 
@@ -310,9 +322,9 @@ ay = middle_point.y - (height / 2)
 
 def isDone(reward):
     done = 0
-    if  reward <= -100:
+    if  reward <= -1:
         done = 1
-    elif reward >= 1000:
+    elif reward >= 100:
         done = 1
         ## develop more.
    
@@ -336,6 +348,10 @@ def test_env(baseline_racer, model, device,testIndex, deterministic=True):
     state = np.ones(number_of_inputs)
     done = 0
     total_reward = 0
+    global currentGateIndexItShouldMoveFor
+    global distance_last_step
+
+
     currentGateIndexItShouldMoveFor = 0
     while not done and timeout>= 0:
         state = torch.FloatTensor(state).to(device).unsqueeze(0)
@@ -347,12 +363,12 @@ def test_env(baseline_racer, model, device,testIndex, deterministic=True):
         if(deterministic == True):
             action = dist.mean.detach().cpu().numpy()[0]
             actx = action
-            baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0], quad_vel.y_val+actx[1], quad_vel.z_val+actx[2],0.1).join()
+            baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0], quad_vel.y_val+actx[1], quad_vel.z_val+actx[2],0.3).join()
 
         else:
             action = torch.clamp(dist.sample(),-1.0,1.0)
             actx = action.data.cpu().numpy()
-            baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.1).join()
+            baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.3).join()
 
 
 
@@ -475,7 +491,7 @@ while not early_stop:
        
         quad_vel = baseline_racer.current_linear_velocity  #.getMultirotorState().kinematics_estimated.linear_velocity
         actx = action.data.cpu().numpy()
-        baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.1).join()
+        baseline_racer.airsim_client.moveByVelocityAsync(quad_vel.x_val+ actx[0][0], quad_vel.y_val+actx[0][1], quad_vel.z_val+actx[0][2],0.3).join()
         #time.sleep(0.5) # how much to sleep?
 
         """#THIS IS WRONG ------------------------- next_state = np.zeros(number_of_inputs)
@@ -569,4 +585,3 @@ while not early_stop:
                 torch.save(model.state_dict(), fname)
             best_reward = test_reward
         if test_reward > TARGET_REWARD: early_stop = True
-
