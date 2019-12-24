@@ -25,3 +25,5 @@ python meplay.py(new code I added for playtesting)
 It saves models if they get better in training then current scores. You can also download .dat (model) files to normal local PC to see how it reacts. You can also see situtation from debug logs and you can save pictures
 
 I will explain other things if needed?
+
+<img src="https://github.com/madratman/airsim_neurips_gifs/blob/master/imgs/neurips_b99_3_drones.gif?raw=true" width="285"> <img src="https://github.com/madratman/airsim_neurips_gifs/blob/master/imgs/neurips_soccer_field_8_drones.gif?raw=true" width="285"> <img src="https://github.com/madratman/airsim_neurips_gifs/blob/master/imgs/neurips_zhangjiajie_4_drones.gif?raw=true" width="285">
