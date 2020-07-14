@@ -35,7 +35,7 @@ All code run & tested with Ubuntu 18.04 LTS, pyTorch with CUDA GPU.
 - After that click settings icon on right corner to a new Instance (we need 2 terminals)
 - On first terminal to start simulation
 - bash run_docker_image.sh "" training    OR  bash run_docker_image.sh "" training headless . Both seems same at this point
-- on second terminal to code run
+- on second terminal to code run.
 
     `cd /home/<username>/NeurIRS2019DroneChallengeRL/src/source`
 
