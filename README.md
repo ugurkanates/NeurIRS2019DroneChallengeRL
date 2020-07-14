@@ -9,6 +9,19 @@
 
 https://sites.google.com/view/longtermplanrl
 
+Note: If you use this repository in your research, please cite the pre-print.
+
+```
+@Article{ates2020longterm,
+    title={Long-Term Planning with Deep Reinforcement Learning on Autonomous Drones},
+    author={Ugurkan Ates},
+    year={2020},
+    eprint={2007.05694},
+    archivePrefix={arXiv},
+    primaryClass={cs.LG}
+}
+
+```
 
 **Microsoft AirSim NeurIRS2019 Autonomous Drone Challenge implemented with Deep RL.**
 
@@ -36,3 +49,4 @@ All code run & tested with Ubuntu 18.04 LTS, pyTorch with CUDA GPU.
 <img src="https://github.com/madratman/airsim_neurips_gifs/blob/master/imgs/neurips_b99_3_drones.gif?raw=true" width="285"> <img src="https://github.com/madratman/airsim_neurips_gifs/blob/master/imgs/neurips_soccer_field_8_drones.gif?raw=true" width="285"> <img src="https://github.com/madratman/airsim_neurips_gifs/blob/master/imgs/neurips_zhangjiajie_4_drones.gif?raw=true" width="285">
 
 *Images taken by competitions website*
+
